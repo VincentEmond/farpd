@@ -247,6 +247,7 @@ arpd_send(eth_t *eth, int op,
     
     for (i=0; i<ignored_len; i++)
     {
+        
         if (op == ARP_OP_REPLY && strcmp(strSourceAddress, ignored_ips[i]) == 0)
         {
             printf("Farpd ignored ARP probe for source ip: %s\n", ignored_ips[i]);
@@ -410,7 +411,8 @@ read_ignore_file(char* file_path)
         char* ipNoNewLine = strtok(read_buff, "\n");
         len = strlen(ipNoNewLine);
         
-        ignored_ips[i] = (char*)malloc(len * sizeof(char)); 
+        //+ 1 Null byte is not included in strlen
+        ignored_ips[i] = (char*)malloc(len + 1 * sizeof(char) ); 
         strcpy(ignored_ips[i], ipNoNewLine);
         printf("Read ip: %s ", ignored_ips[i]);
     }
@@ -428,7 +430,7 @@ main(int argc, char *argv[])
 	dev = NULL;
 	debug = 0;
 	
-	while ((c = getopt(argc, argv, "dif:h?")) != -1) {
+	while ((c = getopt(argc, argv, "di:f:h?")) != -1) {
 		switch (c) {
 		case 'd':
 			debug = 1;
