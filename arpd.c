@@ -39,11 +39,13 @@ static arp_t			*arpd_arp;
 static eth_t			*arpd_eth;
 static struct intf_entry	 arpd_ifent;
 static int			 arpd_sig;
+static unsigned char** ignored_ips;
+static int ignored_len = 0;
 
 static void
 usage(void)
 {
-	fprintf(stderr, "Usage: arpd [-d] [-i interface] [net]\n");
+	fprintf(stderr, "Usage: arpd [-d] [-i interface] [-f ignore_file_path] [net]\n");
 	exit(1);
 }
 
@@ -234,6 +236,30 @@ arpd_send(eth_t *eth, int op,
 	eth_pack_hdr(pkt, tha->addr_eth, sha->addr_eth, ETH_TYPE_ARP);
 	arp_pack_hdr_ethip(pkt + ETH_HDR_LEN, op, sha->addr_eth,
 	    spa->addr_ip, tha->addr_eth, tpa->addr_ip);
+        
+    char* strTargetAddress = addr_ntoa(tpa);
+    char* strSourceAddress = addr_ntoa(spa);
+    
+    
+    //Check if the ip is in the ignore list
+    
+    int i;
+    
+    for (i=0; i<ignored_len; i++)
+    {
+        if (op == ARP_OP_REPLY && strcmp(strSourceAddress, ignored_ips[i]) == 0)
+        {
+            printf("Farpd ignored ARP probe for source ip: %s\n", ignored_ips[i]);
+            return;
+        }
+        else if (op == ARP_OP_REQUEST && strcmp(strTargetAddress, ignored_ips[i]) == 0)
+        {
+            printf("Farpd ignored ARP probe for destination ip: %s\n", ignored_ips[i]);
+            return;
+        }
+
+    }
+      
 	
 	if (op == ARP_OP_REQUEST) {
 		syslog(LOG_DEBUG, "%s: who-has %s tell %s", __func__,
@@ -333,6 +359,63 @@ arpd_signal(void)
 	return (-1);
 }
 
+void
+read_ignore_file(char* file_path)
+{
+    
+    char read_buff[100] = {0};
+    FILE* ignore_list;
+    int numIps = 0;
+    
+    //========================================================
+    //Get the number of lines in the text file so that we can allocate dynamic array.
+    if ((ignore_list = fopen(file_path, "r")) == NULL)
+        err(1, "fopen");
+    
+    while (!feof(ignore_list))
+    {
+        size_t len;
+        if (fgets(read_buff, 100, ignore_list) == NULL && !feof(ignore_list))
+            err(1, "Error reading line in ignore file.");
+        
+        numIps++;
+    }
+    
+    numIps--;
+    ignored_len = numIps;
+    
+    //========================================================
+    
+    //Allocate array of string
+    ignored_ips = (char**)malloc(numIps*sizeof(char*));
+    
+    printf("There were %d lines.\n", numIps);
+    
+    fclose(ignore_list);
+    
+    //Read the content of each lines into the array.
+    
+    if ((ignore_list = fopen(file_path, "r")) == NULL)
+        err(1, "fopen");
+    
+    int i;
+    
+    for (i=0; i<numIps; i++) 
+    {
+        size_t len;
+        if (fgets(read_buff, 100, ignore_list) == NULL && !feof(ignore_list))
+            err(1, "Error reading line in ignore file.");
+        
+        //Get the string without the new line
+        char* ipNoNewLine = strtok(read_buff, "\n");
+        len = strlen(ipNoNewLine);
+        
+        ignored_ips[i] = (char*)malloc(len * sizeof(char)); 
+        strcpy(ignored_ips[i], ipNoNewLine);
+        printf("Read ip: %s ", ignored_ips[i]);
+    }
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -340,11 +423,12 @@ main(int argc, char *argv[])
 	char *dev;
 	int c, debug;
 	FILE *fp;
+    char *ignore_file_path;
 
 	dev = NULL;
 	debug = 0;
 	
-	while ((c = getopt(argc, argv, "di:h?")) != -1) {
+	while ((c = getopt(argc, argv, "dif:h?")) != -1) {
 		switch (c) {
 		case 'd':
 			debug = 1;
@@ -352,18 +436,29 @@ main(int argc, char *argv[])
 		case 'i':
 			dev = optarg;
 			break;
+        case 'f':
+            ignore_file_path = optarg;
+            break;
 		default:
 			usage();
 			break;
 		}
 	}
+    
+    if (ignore_file_path != NULL)
+    {
+        printf("Got path: %s\n", ignore_file_path);
+        read_ignore_file(ignore_file_path);
+    }
+    
 	argc -= optind;
 	argv += optind;
 
 	if (argc == 0)
 		arpd_init(dev, 0, NULL);
 	else
-		arpd_init(dev, argc, argv);
+		arpd_init(dev, argc, argv);    
+
 	
 	if ((fp = fopen(PIDFILE, "w")) == NULL)
 		err(1, "fopen");
